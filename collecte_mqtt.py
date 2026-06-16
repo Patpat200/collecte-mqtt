@@ -52,40 +52,18 @@ def connexion_db():
 
 
 def parse_message(payload):
-    """
-    Transforme le message MQTT en dictionnaire Python.
-
-    Exemple de message reçu :
-    Id=12A6B8AF6CD3,piece=sejour,date=15/06/2026,heure=12:13:14,temp=26,35
-
-    ⚠️  La température utilise une virgule comme séparateur décimal (26,35)
-        ce qui complique le découpage — on gère ça manuellement.
-
-    Retourne un dict ou None si erreur.
-    """
     try:
         parties = payload.split(",")
         data    = {}
-        i = 0
 
-        while i < len(parties):
-            if "=" in parties[i]:
-                cle, valeur = parties[i].split("=", 1)
-                cle    = cle.strip()
-                valeur = valeur.strip()
+        for partie in parties:
+            if "=" in partie:
+                cle, valeur = partie.split("=", 1)
+                data[cle.strip()] = valeur.strip()
 
-                # Cas spécial : temp=26,35 → "26" et "35" sont sur deux éléments séparés
-                # On vérifie si l'élément suivant n'a pas de "=" (c'est la partie décimale)
-                if cle == "temp" and i + 1 < len(parties) and "=" not in parties[i + 1]:
-                    valeur = valeur + "." + parties[i + 1].strip()
-                    i += 1  # on saute l'élément suivant
-
-                data[cle] = valeur
-            i += 1
-
-        # Convertir la date JJ/MM/AAAA → AAAA-MM-JJ (format MySQL)
+        # Convertir date JJ/MM/AAAA → AAAA-MM-JJ pour MySQL
         jour, mois, annee = data["date"].split("/")
-        timestamp = f"{annee}-{mois}-{jour} {data['heure']}"
+        timestamp = f"{annee}-{mois}-{jour} {data['time']}"
 
         return {
             "id"          : data["Id"],
@@ -95,7 +73,7 @@ def parse_message(payload):
         }
 
     except Exception as e:
-        print(f"[PARSE] ❌ Erreur sur le message '{payload}' : {e}")
+        print(f"[PARSE] Erreur sur le message '{payload}' : {e}")
         return None
 
 
