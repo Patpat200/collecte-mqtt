@@ -1,8 +1,8 @@
 **1 — Installer git et cloner le repo**
 ```bash
 sudo apt install git -y
-git clone https://github.com/votreuser/votreRepo.git
-cd votreRepo
+git clone https://github.com/Patpat200/collecte-mqtt
+cd collecte-mqtt
 ```
 
 **2 — Créer le venv et installer les dépendances**
