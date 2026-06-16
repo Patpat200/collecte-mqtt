@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-SAE 2.04 - Groupe 11
-Script de collecte MQTT → MySQL
-VM Debian → PC Windows (10.252.11.77)
-"""
 
 import paho.mqtt.client as mqtt
 import mysql.connector
@@ -12,14 +7,14 @@ from mysql.connector import Error
 
 # ============ CONFIGURATION ============
 
-BROKER = "test.mosquitto.org"
+BROKER = "broker.hivemq.com"
 PORT   = 1883
-TOPICS = [
+TOPICS = [ 
     "IUT/Colmar2026/SAE2.04/Maison1",
     "IUT/Colmar2026/SAE2.04/Maison2"
 ]
 
-DB_HOST     = "10.252.11.77"
+DB_HOST     = "10.252.11.79"
 DB_PORT     = 3306
 DB_USER     = "toto"
 DB_PASSWORD = "toto"
@@ -44,10 +39,10 @@ def connexion_db():
             password = DB_PASSWORD,
             database = DB_NAME
         )
-        print(f"[DB] ✅ Connecté à MySQL ({DB_HOST})")
+        print(f"[DB] Connecté à MySQL ({DB_HOST})")
         return conn
     except Error as e:
-        print(f"[DB] ❌ Impossible de se connecter : {e}")
+        print(f"[DB] Impossible de se connecter : {e}")
         return None
 
 
@@ -108,7 +103,7 @@ def inserer_en_db(conn, data):
     conn.commit()
     cursor.close()
 
-    print(f"[DB] ✅ Inséré — {data['id']} | {data['piece']} | {data['temperature']}°C | {data['timestamp']}")
+    print(f"[DB] Inséré — {data['id']} | {data['piece']} | {data['temperature']}°C | {data['timestamp']}")
 
 
 def vider_cache(conn):
@@ -120,17 +115,17 @@ def vider_cache(conn):
     if not cache:
         return
 
-    print(f"[CACHE] 🔄 {len(cache)} message(s) en attente, réinsertion...")
+    print(f"[CACHE] {len(cache)} message(s) en attente, réinsertion...")
 
     for data in cache[:]:   # on copie la liste pour pouvoir la modifier pendant la boucle
         try:
             inserer_en_db(conn, data)
             cache.remove(data)
         except Error as e:
-            print(f"[CACHE] ❌ Échec réinsertion : {e}")
+            print(f"[CACHE] Échec réinsertion : {e}")
             break   # on arrête si ça échoue encore
 
-    print("[CACHE] ✅ Cache vidé")
+    print("[CACHE] Cache vidé")
 
 
 def traiter_message(data):
@@ -148,11 +143,11 @@ def traiter_message(data):
             inserer_en_db(conn, data)
             conn.close()
         except Error as e:
-            print(f"[DB] ❌ Erreur insertion : {e} → mise en cache")
+            print(f"[DB] Erreur insertion : {e} → mise en cache")
             cache.append(data)
             conn.close()
     else:
-        print(f"[CACHE] ⚠️  DB indisponible → message mis en cache (total : {len(cache) + 1})")
+        print(f"[CACHE] DB indisponible → message mis en cache (total : {len(cache) + 1})")
         cache.append(data)
 
 
@@ -161,19 +156,19 @@ def traiter_message(data):
 def on_connect(client, userdata, flags, rc):
     """Appelé quand le client se connecte au broker."""
     if rc == 0:
-        print(f"[MQTT] ✅ Connecté au broker {BROKER}")
+        print(f"[MQTT] Connecté au broker {BROKER}")
         # S'abonner à tous les topics
         for topic in TOPICS:
             client.subscribe(topic)
-            print(f"[MQTT] 📡 Abonné au topic : {topic}")
+            print(f"[MQTT] Abonné au topic : {topic}")
     else:
-        print(f"[MQTT] ❌ Erreur de connexion (code {rc})")
+        print(f"[MQTT] Erreur de connexion (code {rc})")
 
 
 def on_message(client, userdata, msg):
     """Appelé à chaque message reçu."""
     payload = msg.payload.decode("utf-8").strip()
-    print(f"\n[MQTT] 📨 Message reçu sur {msg.topic}")
+    print(f"\n[MQTT] Message reçu sur {msg.topic}")
     print(f"       Contenu : {payload}")
 
     data = parse_message(payload)
@@ -183,7 +178,7 @@ def on_message(client, userdata, msg):
 
 def on_disconnect(client, userdata, rc):
     """Appelé quand le client se déconnecte du broker."""
-    print(f"[MQTT] ⚠️  Déconnecté du broker (code {rc})")
+    print(f"[MQTT]  Déconnecté du broker (code {rc})")
 
 
 # ============ PROGRAMME PRINCIPAL ============
