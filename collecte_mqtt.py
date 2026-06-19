@@ -5,39 +5,29 @@ import paho.mqtt.client as mqtt
 import mysql.connector
 from mysql.connector import Error
 
-# ============ CONFIGURATION ============
-
 BROKER = "broker.hivemq.com"
-PORT   = 1883
-TOPICS = [ 
+PORT = 1883
+TOPICS = [
     "IUT/Colmar2026/SAE2.04/Maison1",
     "IUT/Colmar2026/SAE2.04/Maison2"
 ]
 
-DB_HOST     = "10.252.11.79"
-DB_PORT     = 3306
-DB_USER     = "toto"
+DB_HOST = "10.252.11.79"
+DB_PORT = 3306
+DB_USER = "toto"
 DB_PASSWORD = "toto"
-DB_NAME     = "sae204"
+DB_NAME = "sae204"
 
-# =======================================
-
-# Si la base de données est coupée, on stocke les messages ici
+# Messages en attente si la base est indisponible
 cache = []
 
 
 def connexion_db():
-    """
-    Essaie de se connecter à MySQL.
-    Retourne la connexion si OK, sinon retourne None.
-    """
     try:
         conn = mysql.connector.connect(
-            host     = DB_HOST,
-            port     = DB_PORT,
-            user     = DB_USER,
-            password = DB_PASSWORD,
-            database = DB_NAME
+            host=DB_HOST, port=DB_PORT,
+            user=DB_USER, password=DB_PASSWORD,
+            database=DB_NAME
         )
         print(f"[DB] Connecté à MySQL ({DB_HOST})")
         return conn
@@ -47,99 +37,78 @@ def connexion_db():
 
 
 def parse_message(payload):
+    # "Id=12A6,piece=sejour,date=15/06/2026,heure=12:13:14,temp=26,35" -> dict
     try:
-        parties = payload.split(",")
-        data    = {}
-
-        for partie in parties:
-            if "=" in partie:
-                cle, valeur = partie.split("=", 1)
+        data = {}
+        for morceau in payload.split(","):
+            if "=" in morceau:
+                cle, valeur = morceau.split("=", 1)
                 data[cle.strip()] = valeur.strip()
 
-        # Convertir date JJ/MM/AAAA → AAAA-MM-JJ pour MySQL
         jour, mois, annee = data["date"].split("/")
         timestamp = f"{annee}-{mois}-{jour} {data['time']}"
 
         return {
-            "id"          : data["Id"],
-            "piece"       : data["piece"],
-            "timestamp"   : timestamp,
-            "temperature" : float(data["temp"])
+            "id": data["Id"],
+            "piece": data["piece"],
+            "timestamp": timestamp,
+            "temperature": float(data["temp"])
         }
-
     except Exception as e:
         print(f"[PARSE] Erreur sur le message '{payload}' : {e}")
         return None
 
 
 def inserer_en_db(conn, data):
-    """
-    Insère un capteur (s'il n'existe pas déjà) puis sa mesure dans MySQL.
-    Utilise INSERT IGNORE pour ne pas planter si le capteur existe déjà.
-    """
     cursor = conn.cursor()
 
-    # 1. Insérer le capteur si nouveau
+    nom_par_defaut = f"Capteur_{data['id'][:6]}"
     cursor.execute("""
         INSERT IGNORE INTO capteurs (id_capteur, nom_capteur, piece, emplacement)
         VALUES (%s, %s, %s, %s)
-    """, (
-        data["id"],
-        f"Capteur_{data['id'][:6]}",   # nom par défaut : "Capteur_12A6B8"
-        data["piece"],
-        data["piece"]
-    ))
+    """, (data["id"], nom_par_defaut, data["piece"], data["piece"]))
 
-    # 2. Insérer la mesure
     cursor.execute("""
         INSERT INTO mesures (id_capteur, timestamp_mesure, temperature)
         VALUES (%s, %s, %s)
-    """, (
-        data["id"],
-        data["timestamp"],
-        data["temperature"]
-    ))
+    """, (data["id"], data["timestamp"], data["temperature"]))
 
     conn.commit()
     cursor.close()
-
     print(f"[DB] Inséré — {data['id']} | {data['piece']} | {data['temperature']}°C | {data['timestamp']}")
 
 
 def vider_cache(conn):
-    """
-    Après une reconnexion DB, réinsère tous les messages stockés dans le cache.
-    """
     global cache
-
-    if not cache:
+    if len(cache) == 0:
         return
 
     print(f"[CACHE] {len(cache)} message(s) en attente, réinsertion...")
+    messages_restants = []
+    echec = False
 
-    for data in cache[:]:   # on copie la liste pour pouvoir la modifier pendant la boucle
+    for data in cache:
+        if echec:
+            messages_restants.append(data)
+            continue
         try:
             inserer_en_db(conn, data)
-            cache.remove(data)
         except Error as e:
             print(f"[CACHE] Échec réinsertion : {e}")
-            break   # on arrête si ça échoue encore
+            messages_restants.append(data)
+            echec = True
 
-    print("[CACHE] Cache vidé")
+    cache = messages_restants
+    print("[CACHE] Cache vidé" if len(cache) == 0 else f"[CACHE] {len(cache)} message(s) toujours en attente")
 
 
 def traiter_message(data):
-    """
-    Essaie d'insérer en DB.
-    Si la DB est indisponible → met le message en cache.
-    """
     global cache
-
     conn = connexion_db()
 
-    if conn:
+    if conn is not None:
         try:
-            vider_cache(conn)       # vider le cache en premier si besoin
+            vider_cache(conn)
             inserer_en_db(conn, data)
             conn.close()
         except Error as e:
@@ -151,13 +120,9 @@ def traiter_message(data):
         cache.append(data)
 
 
-# ============ CALLBACKS MQTT ============
-
 def on_connect(client, userdata, flags, rc):
-    """Appelé quand le client se connecte au broker."""
     if rc == 0:
         print(f"[MQTT] Connecté au broker {BROKER}")
-        # S'abonner à tous les topics
         for topic in TOPICS:
             client.subscribe(topic)
             print(f"[MQTT] Abonné au topic : {topic}")
@@ -166,43 +131,33 @@ def on_connect(client, userdata, flags, rc):
 
 
 def on_message(client, userdata, msg):
-    """Appelé à chaque message reçu."""
     payload = msg.payload.decode("utf-8").strip()
     print(f"\n[MQTT] Message reçu sur {msg.topic}")
     print(f"       Contenu : {payload}")
 
     data = parse_message(payload)
-    if data:
+    if data is not None:
         traiter_message(data)
 
 
 def on_disconnect(client, userdata, rc):
-    """Appelé quand le client se déconnecte du broker."""
-    print(f"[MQTT]  Déconnecté du broker (code {rc})")
+    print(f"[MQTT] Déconnecté du broker (code {rc})")
 
-
-# ============ PROGRAMME PRINCIPAL ============
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("  SAE 2.04 - Collecte MQTT → MySQL")
-    print(f"  Broker : {BROKER}:{PORT}")
-    print(f"  MySQL  : {DB_HOST}:{DB_PORT} / {DB_NAME}")
+    print("  SAE 2.04 - Collecte MQTT vers MySQL")
+    print(f"  Broker MQTT : {BROKER}:{PORT}")
+    print(f"  Base MySQL  : {DB_HOST}:{DB_PORT} / {DB_NAME}")
     print("=" * 50)
 
-    # Créer le client MQTT
     client = mqtt.Client()
-
-    # Associer les fonctions callbacks
-    client.on_connect    = on_connect
-    client.on_message    = on_message
+    client.on_connect = on_connect
+    client.on_message = on_message
     client.on_disconnect = on_disconnect
 
-    # Se connecter au broker
-    print(f"\n[INFO] Connexion au broker MQTT...")
+    print("\n[INFO] Connexion au broker MQTT...")
     client.connect(BROKER, PORT, keepalive=60)
 
-    # Boucle infinie — écoute les messages en permanence
-    # Ctrl+C pour arrêter
     print("[INFO] En écoute... (Ctrl+C pour arrêter)\n")
     client.loop_forever()
